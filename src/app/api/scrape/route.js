@@ -1,146 +1,85 @@
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import prisma from '@/lib/prisma';
-import { scrapePsaData } from '@/lib/scraper';
-import { processScrapedData } from '@/lib/calculator';
-
-export const dynamic = 'force-dynamic';
-
-// Input validation schema
-const scrapeRequestSchema = z.object({
-  url: z.string().url(),
-  cardName: z.string().min(1)
-});
-
 export async function POST(request) {
+  // Add CORS headers
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+
+  // Handle preflight requests
+  if (request.method === 'OPTIONS') {
+    return new NextResponse(null, { status: 204, headers });
+  }
+
   try {
+    console.log('Received scrape request');
+    
     // Parse request body
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+      console.log('Request body:', body);
+    } catch (error) {
+      console.error('Error parsing request body:', error);
+      return NextResponse.json(
+        { error: 'Invalid request body', message: 'Could not parse JSON body' },
+        { status: 400, headers }
+      );
+    }
     
     // Validate input
     const result = scrapeRequestSchema.safeParse(body);
     if (!result.success) {
+      console.error('Validation error:', result.error.format());
       return NextResponse.json(
         { error: 'Invalid input', details: result.error.format() },
-        { status: 400 }
+        { status: 400, headers }
       );
     }
     
     const { url, cardName } = result.data;
+    console.log(`Processing request for card: ${cardName}, URL: ${url}`);
 
     // Check if URL is a valid PSA Auction Prices URL
     if (!url.includes('psacard.com/auctionprices')) {
+      console.error(`Invalid URL: ${url}`);
       return NextResponse.json(
         { error: 'Invalid URL', message: 'The URL must be from PSA Auction Prices website' },
-        { status: 400 }
+        { status: 400, headers }
       );
     }
-
-    // Use our new scraper to fetch data from PSA API
-    const scrapedData = await scrapePsaData(url, cardName);
+    console.log(`Successfully scraped and stored data for ${cardName}`);
     
-    // Process the data and calculate metrics
-    const processedData = processScrapedData(scrapedData);
-    
-    // Store data in the database
-    const cardRecord = await prisma.card.upsert({
-      where: {
-        name_psaUrl: {
-          name: processedData.name,
-          psaUrl: processedData.psaUrl
-        }
-      },
-      update: {
-        updatedAt: new Date()
-      },
-      create: {
-        name: processedData.name,
-        psaUrl: processedData.psaUrl
-      }
-    });
-
-    // Store each grade and its data
-    for (const gradeData of processedData.grades) {
-      // Create or update the grade
-      const grade = await prisma.grade.upsert({
-        where: {
-          cardId_grade: {
-            cardId: cardRecord.id,
-            grade: gradeData.grade
-          }
-        },
-        update: {
-          recentPrice: gradeData.recentPrice,
-          averagePrice: gradeData.averagePrice,
-          population: gradeData.population,
-          marketCap: gradeData.marketCap
-        },
-        create: {
-          cardId: cardRecord.id,
-          grade: gradeData.grade,
-          recentPrice: gradeData.recentPrice,
-          averagePrice: gradeData.averagePrice,
-          population: gradeData.population,
-          marketCap: gradeData.marketCap
-        }
-      });
-
-      // Store auction data
-      if (gradeData.auctions && gradeData.auctions.length > 0) {
-        // Delete existing auctions for this grade to avoid duplicates
-        await prisma.auction.deleteMany({
-          where: {
-            gradeId: grade.id
-          }
-        });
-
-        // Create new auction records
-        await prisma.auction.createMany({
-          data: gradeData.auctions.map(auction => ({
-            gradeId: grade.id,
-            date: new Date(auction.date),
-            auctionHouse: auction.auctionHouse,
-            type: auction.type,
-            certification: auction.certification,
-            price: auction.price
-          }))
-        });
-      }
-
-      // Store volume metrics
-      await prisma.volumeMetrics.upsert({
-        where: {
-          gradeId: grade.id
-        },
-        update: {
-          totalVolume: gradeData.volumeMetrics.totalVolume,
-          volume10Y: gradeData.volumeMetrics.volume10Y,
-          volume5Y: gradeData.volumeMetrics.volume5Y,
-          annualVolume: gradeData.volumeMetrics.annualVolume,
-          monthlyVolume: gradeData.volumeMetrics.monthlyVolume
-        },
-        create: {
-          gradeId: grade.id,
-          totalVolume: gradeData.volumeMetrics.totalVolume,
-          volume10Y: gradeData.volumeMetrics.volume10Y,
-          volume5Y: gradeData.volumeMetrics.volume5Y,
-          annualVolume: gradeData.volumeMetrics.annualVolume,
-          monthlyVolume: gradeData.volumeMetrics.monthlyVolume
-        }
-      });
-    }
-
     // Return the processed data
     return NextResponse.json({
       success: true,
       message: 'Data scraped and stored successfully',
       data: processedData
-    });
+    }, { headers });
   } catch (error) {
     console.error('Error processing scrape request:', error);
+    
+    // Determine if this is a client or server error
+    let statusCode = 500;
+    let errorMessage = error.message || 'An unknown error occurred';
+    
+    // Common client errors
+    if (
+      errorMessage.includes('Invalid PSA URL') || 
+      errorMessage.includes('Unable to extract card ID') ||
+      errorMessage.includes('No auction data found')
+    ) {
+      statusCode = 400;
+    }
+    
+    // Return detailed error for debugging
     return NextResponse.json(
-      { error: 'Failed to scrape data', message: error.message },
-      { status: 500 }
+      { 
+        error: 'Failed to scrape data', 
+        message: errorMessage,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
+      { status: statusCode, headers }
     );
   }
 }
