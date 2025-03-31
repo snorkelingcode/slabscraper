@@ -59,7 +59,7 @@ export default function ScrapeForm({ onScrapeStart, onScrapeResult, onScrapeErro
       
       <div>
         <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-1">
-          PSA URL
+          PSA Auction Prices URL
         </label>
         <input
           id="url"
@@ -70,6 +70,7 @@ export default function ScrapeForm({ onScrapeStart, onScrapeResult, onScrapeErro
           className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           disabled={isSubmitting}
         />
+        <p className="mt-1 text-xs text-gray-500">Example: https://www.psacard.com/auctionprices/baseball-cards/1967-topps/mets-rookies/values/187370</p>
       </div>
       
       <button

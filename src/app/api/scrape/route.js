@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
-import { fetchHtml, parseCardData } from '@/lib/server-functions';
+import { scrapePsaData } from '@/lib/scraper';
 import { processScrapedData } from '@/lib/calculator';
 
 export const dynamic = 'force-dynamic';
@@ -28,26 +28,19 @@ export async function POST(request) {
     
     const { url, cardName } = result.data;
 
-    // Fetch the HTML
-    const htmlResult = await fetchHtml(url);
-    if (htmlResult.error) {
+    // Check if URL is a valid PSA Auction Prices URL
+    if (!url.includes('psacard.com/auctionprices')) {
       return NextResponse.json(
-        { error: 'Failed to fetch URL', message: htmlResult.error },
-        { status: 500 }
+        { error: 'Invalid URL', message: 'The URL must be from PSA Auction Prices website' },
+        { status: 400 }
       );
     }
 
-    // Parse the card data
-    const parseResult = await parseCardData(htmlResult.data, cardName, url);
-    if (parseResult.error) {
-      return NextResponse.json(
-        { error: 'Failed to parse card data', message: parseResult.error },
-        { status: 500 }
-      );
-    }
+    // Use our new scraper to fetch data from PSA API
+    const scrapedData = await scrapePsaData(url, cardName);
     
     // Process the data and calculate metrics
-    const processedData = processScrapedData(parseResult.data);
+    const processedData = processScrapedData(scrapedData);
     
     // Store data in the database
     const cardRecord = await prisma.card.upsert({
@@ -151,4 +144,3 @@ export async function POST(request) {
     );
   }
 }
-
