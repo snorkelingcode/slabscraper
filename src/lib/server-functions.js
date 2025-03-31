@@ -1,23 +1,43 @@
+'use server';
+
 import cheerio from 'cheerio';
-import { parseISO } from 'date-fns';
 
 /**
- * Scrapes PSA card data from a given URL
- * @param {string} url - The PSA URL to scrape
- * @param {string} cardName - The name of the card
- * @returns {Promise<Object>} - The scraped data
+ * Server action for fetching and parsing HTML content
+ * @param {string} url - The URL to fetch
+ * @returns {Promise<{data: string, error: string|null}>}
  */
-export async function scrapePsaData(url, cardName) {
+export async function fetchHtml(url) {
   try {
-    // Fetch the HTML content from the URL using native fetch instead of axios
     const response = await fetch(url);
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
+      return {
+        data: null,
+        error: `Failed to fetch data: ${response.status} ${response.statusText}`
+      };
     }
     
-    const data = await response.text();
-    const $ = cheerio.load(data);
+    const html = await response.text();
+    return { data: html, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: `Error fetching URL: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Server action for parsing PSA card data
+ * @param {string} html - HTML content
+ * @param {string} cardName - Name of the card
+ * @param {string} url - Source URL
+ * @returns {Promise<{data: object|null, error: string|null}>}
+ */
+export async function parseCardData(html, cardName, url) {
+  try {
+    const $ = cheerio.load(html);
     
     // Extract card information
     const cardData = {
@@ -84,7 +104,7 @@ export async function scrapePsaData(url, cardName) {
             const [month, day, year] = dateText.split('/');
             date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
           } catch (error) {
-            console.error(`Error parsing date: ${dateText}`, error);
+            console.error(`Error parsing date: ${dateText}`);
           }
 
           // Parse the price
@@ -112,9 +132,11 @@ export async function scrapePsaData(url, cardName) {
       });
     }
 
-    return cardData;
+    return { data: cardData, error: null };
   } catch (error) {
-    console.error('Error scraping PSA data:', error);
-    throw new Error(`Failed to scrape PSA data: ${error.message}`);
+    return {
+      data: null,
+      error: `Error parsing card data: ${error.message}`
+    };
   }
 }

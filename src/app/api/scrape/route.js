@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
-import { scrapePsaData } from '@/lib/scraper';
+import { fetchHtml, parseCardData } from '@/lib/server-functions';
 import { processScrapedData } from '@/lib/calculator';
 
 // Input validation schema
@@ -26,11 +26,26 @@ export async function POST(request) {
     
     const { url, cardName } = result.data;
 
-    // Scrape data from the URL
-    const scrapedData = await scrapePsaData(url, cardName);
+    // Fetch the HTML
+    const htmlResult = await fetchHtml(url);
+    if (htmlResult.error) {
+      return NextResponse.json(
+        { error: 'Failed to fetch URL', message: htmlResult.error },
+        { status: 500 }
+      );
+    }
+
+    // Parse the card data
+    const parseResult = await parseCardData(htmlResult.data, cardName, url);
+    if (parseResult.error) {
+      return NextResponse.json(
+        { error: 'Failed to parse card data', message: parseResult.error },
+        { status: 500 }
+      );
+    }
     
     // Process the data and calculate metrics
-    const processedData = processScrapedData(scrapedData);
+    const processedData = processScrapedData(parseResult.data);
     
     // Store data in the database
     const cardRecord = await prisma.card.upsert({

@@ -3,10 +3,20 @@
 const nextConfig = {
   // Enable strict mode for React
   reactStrictMode: true,
-  // Experimental features not needed in newer Next.js versions
-  experimental: {
-    // App directory is stable in newer Next.js versions, no need to mark as experimental
+  
+  // Configure webpack to handle Undici/Cheerio properly
+  webpack: (config, { isServer }) => {
+    // Force Undici to be transpiled
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        'undici': false,
+      };
+    }
+    
+    return config;
   },
+  
   // Configure image domains if needed
   images: {
     domains: [],
