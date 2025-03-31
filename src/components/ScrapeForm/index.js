@@ -29,7 +29,7 @@ export default function ScrapeForm({ onScrapeStart, onScrapeResult, onScrapeErro
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to scrape data');
+        throw new Error(data.error || data.message || 'Failed to scrape data');
       }
 
       onScrapeResult(data);
