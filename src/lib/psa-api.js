@@ -1,121 +1,136 @@
-/**
- * Process raw auction data into structured format grouped by grade
- * @param {Array} auctionData - Raw auction data from PSA API
- * @param {string} cardName - Name of the card
- * @param {string} psaUrl - Original PSA URL
- * @returns {Object} - Structured card data with grades
- */
-export function processAuctionData(auctionData, cardName, psaUrl) {
-    console.log(`Processing ${auctionData.length} auction records for ${cardName}`);
-    
-    // Initialize card object
-    const cardData = {
-      name: cardName,
-      psaUrl: psaUrl,
-      grades: []
-    };
+export async function fetchAuctionData(cardId) {
+    try {
+      console.log(`Fetching auction data for card ID: ${cardId}`);
+      
+      const pageSize = 50; // Reduced page size to prevent timeouts
+      let start = 0;
+      let allSales = [];
+      let pageCounter = 1;
   
-    // Group auction data by grade
-    const gradeMap = new Map();
-    
-    // Make sure auctionData is an array
-    if (!Array.isArray(auctionData)) {
-      console.error('Invalid auction data:', auctionData);
-      throw new Error('Auction data must be an array');
-    }
-    
-    auctionData.forEach((sale, index) => {
+      // Get first page of results
+      const formData = new URLSearchParams({
+        "specID": cardId.toString(),
+        "draw": pageCounter.toString(),
+        "start": start.toString(),
+        "length": pageSize.toString()
+      });
+  
+      console.log(`Making first API request with params:`, Object.fromEntries(formData));
+  
+      const response = await fetch(AUCTION_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'application/json',
+          'Origin': 'https://www.psacard.com',
+          'Referer': 'https://www.psacard.com/'
+        },
+        body: formData,
+        // Add timeout to prevent hanging requests
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+  
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`API response error (${response.status}):`, errorText);
+        throw new Error(`API request failed with status ${response.status}: ${errorText.substring(0, 200)}`);
+      }
+  
+      let jsonData;
       try {
-        // Skip invalid sales
-        if (!sale || typeof sale !== 'object') {
-          console.warn(`Skipping invalid sale at index ${index}`);
-          return;
-        }
+        jsonData = await response.json();
+      } catch (error) {
+        console.error('Error parsing JSON response:', error);
+        throw new Error('Failed to parse API response as JSON. The server might be rate limiting requests.');
+      }
+  
+      console.log(`First page response received. Total records: ${jsonData.recordsTotal || 'unknown'}`);
+      
+      if (!jsonData.data || !Array.isArray(jsonData.data)) {
+        console.error('Unexpected API response format:', jsonData);
+        throw new Error('Invalid API response format. Expected data array.');
+      }
+      
+      allSales = jsonData.data;
+      const totalSales = jsonData.recordsTotal || 0;
+  
+      // Limit the number of pages to fetch to avoid timeouts
+      const maxPages = 5;
+      const additionalPages = Math.min(
+        Math.ceil((totalSales - pageSize) / pageSize),
+        maxPages
+      );
+      
+      if (additionalPages > 0) {
+        console.log(`Will fetch up to ${additionalPages} additional pages`);
         
-        // Get the grade, defaulting to "Unknown" if not present
-        const grade = sale.GradeString || "Unknown";
-        
-        // Get or initialize grade group
-        if (!gradeMap.has(grade)) {
-          gradeMap.set(grade, {
-            grade: grade,
-            auctions: [],
-            recentPrice: null,
-            averagePrice: null,
-            population: null
-          });
-        }
-        
-        const gradeGroup = gradeMap.get(grade);
-        
-        // Parse price safely
-        let price = 0;
-        if (sale.SalePrice) {
-          // Remove all non-numeric characters except for decimal point
-          const priceStr = sale.SalePrice.replace(/[^0-9.]/g, '');
-          price = parseFloat(priceStr || 0);
+        for (let i = 0; i < additionalPages; i++) {
+          pageCounter++;
+          start += pageSize;
           
-          // Check for valid price
-          if (isNaN(price)) {
-            console.warn(`Invalid price format at index ${index}: ${sale.SalePrice}`);
-            price = 0;
+          // Add a longer delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          console.log(`Fetching page ${pageCounter} with start: ${start}`);
+          
+          try {
+            const nextFormData = new URLSearchParams({
+              "specID": cardId.toString(),
+              "draw": pageCounter.toString(),
+              "start": start.toString(),
+              "length": pageSize.toString()
+            });
+  
+            const nextResponse = await fetch(AUCTION_API_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'application/json',
+                'Origin': 'https://www.psacard.com',
+                'Referer': 'https://www.psacard.com/'
+              },
+              body: nextFormData,
+              signal: AbortSignal.timeout(10000) // 10 second timeout
+            });
+  
+            if (!nextResponse.ok) {
+              console.warn(`API request for page ${pageCounter} failed with status ${nextResponse.status}. Continuing with data collected so far.`);
+              break; // Continue with the data we have instead of failing completely
+            }
+  
+            let nextJsonData;
+            try {
+              nextJsonData = await nextResponse.json();
+            } catch (jsonError) {
+              console.warn(`Failed to parse JSON for page ${pageCounter}:`, jsonError);
+              break; // Stop pagination but continue with data collected so far
+            }
+  
+            if (nextJsonData.data && Array.isArray(nextJsonData.data)) {
+              allSales = [...allSales, ...nextJsonData.data];
+              console.log(`Added ${nextJsonData.data.length} more sales. Total so far: ${allSales.length}`);
+            }
+          } catch (pageError) {
+            console.warn(`Error fetching page ${pageCounter}:`, pageError);
+            break; // Stop pagination but continue with data collected so far
           }
         }
-        
-        // Add auction to grade group
-        const auctionEntry = {
-          date: sale.EndDate || new Date().toISOString(),
-          auctionHouse: sale.Name || "Unknown",
-          type: sale.AuctionType || "Unknown",
-          certification: sale.CertNo || "",
-          price: price
-        };
-        
-        gradeGroup.auctions.push(auctionEntry);
-      } catch (error) {
-        console.error(`Error processing sale at index ${index}:`, error, sale);
-        // Continue processing other sales
       }
-    });
-    
-    console.log(`Found ${gradeMap.size} different grades`);
-    
-    // Calculate recent price and average price for each grade
-    gradeMap.forEach((gradeData, grade) => {
-      try {
-        // Sort auctions by date (most recent first)
-        gradeData.auctions.sort((a, b) => {
-          const dateA = new Date(a.date);
-          const dateB = new Date(b.date);
-          
-          // Handle invalid dates
-          if (isNaN(dateA.getTime()) && isNaN(dateB.getTime())) return 0;
-          if (isNaN(dateA.getTime())) return 1;
-          if (isNaN(dateB.getTime())) return -1;
-          
-          return dateB - dateA;
-        });
-        
-        // Set most recent price
-        if (gradeData.auctions.length > 0) {
-          gradeData.recentPrice = gradeData.auctions[0].price;
-        }
-        
-        // Calculate average price
-        if (gradeData.auctions.length > 0) {
-          const totalPrice = gradeData.auctions.reduce((sum, auction) => sum + auction.price, 0);
-          gradeData.averagePrice = totalPrice / gradeData.auctions.length;
-        }
-        
-        console.log(`Grade ${grade}: ${gradeData.auctions.length} auctions, recent price: ${gradeData.recentPrice}, avg price: ${gradeData.averagePrice}`);
-      } catch (error) {
-        console.error(`Error calculating metrics for grade ${grade}:`, error);
-        // Don't throw, just log the error and continue
+  
+      console.log(`Successfully collected ${allSales.length} auction records`);
+      
+      // Even if we only got a few records, return what we have
+      return allSales;
+    } catch (error) {
+      console.error('Error fetching auction data:', error);
+      
+      // If we failed completely, throw a user-friendly error
+      if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+        throw new Error('Request timed out. The PSA API might be experiencing high load or rate limiting.');
       }
-    });
-    
-    // Add grade data to card
-    cardData.grades = Array.from(gradeMap.values());
-    
-    return cardData;
+      
+      throw error;
+    }
   }
