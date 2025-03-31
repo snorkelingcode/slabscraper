@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
+// Explicitly mark this route as dynamic
+export const dynamic = 'force-dynamic';
+
 // GET all cards
 export async function GET(request) {
   try {

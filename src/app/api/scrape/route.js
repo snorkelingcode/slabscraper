@@ -4,6 +4,8 @@ import prisma from '@/lib/prisma';
 import { fetchHtml, parseCardData } from '@/lib/server-functions';
 import { processScrapedData } from '@/lib/calculator';
 
+export const dynamic = 'force-dynamic';
+
 // Input validation schema
 const scrapeRequestSchema = z.object({
   url: z.string().url(),
@@ -149,3 +151,4 @@ export async function POST(request) {
     );
   }
 }
+
