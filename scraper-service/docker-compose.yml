@@ -1,0 +1,10 @@
+version: '3'
+services:
+  scraper:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - ALLOWED_ORIGIN=https://your-vercel-app.vercel.app
+    restart: unless-stopped
